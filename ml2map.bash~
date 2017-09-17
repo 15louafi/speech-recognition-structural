@@ -1,0 +1,16 @@
+#!/bin/bash
+MLDIR=$1
+MAPDIR=$2
+mlscp=./ml.scp
+ml2mapscp=./ml2map.scp
+rm $mlscp
+rm $ml2mapscp
+
+for mlfile in `ls ${MLDIR}/*.hmm`;do
+    mapfile=`echo $mlfile |sed -e "s@${MLDIR}@${MAPDIR}@"`
+    echo $mlfile >> $mlscp
+    echo "$mlfile $mapfile" >> $ml2mapscp
+done
+
+MATLAB=/opt/MATLAB/R2015a/bin/matlab
+echo "ml2map('${mlscp}','${ml2mapscp}');quit;" | $MATLAB -nojvm -nosplash -nodesktop

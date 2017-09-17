@@ -1,0 +1,87 @@
+#!/bin/bash
+
+# 用意すべきファイル
+# 特になし（強いて言えばwavファイル）
+
+# 途中で生成されるファイル
+CONFIG=config/config.HCopy   # 設定ファイルの作成先を指定
+SCPFILE=config/scp.HCopy     # SCPファイル
+
+# 各種条件（他の条件も$CONFIG作成の部分で調整可）
+TARGETKIND=FBANK #MFCC_E_D_A # MELSPEC
+
+# ディレクトリ指定（入力のwavディレクトリと出力のMFCCディレクトリ）
+#ROOT=/home/louafi
+WAVDIR=c/Users #Revise directory to the audio files !!!
+#WAVDIR=${YOUR_DIR}/tomatsu
+MFCCDIR=01feature/${TARGETKIND}
+
+if [ $# -eq 0 ]; then 
+    echo """
+usage : ./hcopy.bash N
+
+    N = 1 : make scp-file
+        2 : wav  -> mfcc      [HCopy]
+        ALL : run ALL process
+        clean : 
+"""
+    exit
+else
+    EXEC=$1;
+fi
+
+if [ $EXEC = 1 ] || [ $EXEC = ALL ];then
+    echo """
+################
+# make SCPFILE #
+################
+"""
+    mkdir -p $MFCCDIR
+    rm -f $SCPFILE
+
+    for wavfile in ${WAVDIR}/*.wav;do
+        mfccfile=$( echo $wavfile | sed -e "s@${WAVDIR}@${MFCCDIR}@g" -e "s@\.wav@.mfcc@g" )
+        echo "$wavfile $mfccfile" | tee -a $SCPFILE
+    done
+fi
+
+if [ $EXEC = 2 ] || [ $EXEC = ALL ];then
+    echo """
+######################
+# Feature Extraction #
+######################
+"""
+    # make config
+    echo "SOURCEKIND     = WAVEFORM" >  $CONFIG
+    echo "SOURCEFORMAT   = WAVE"   >> $CONFIG
+    echo "ZMEANSOURCE    = T"        >> $CONFIG
+
+    echo "TARGETKIND     = ${TARGETKIND}" >> $CONFIG
+    echo "ENORMALISE     = F"             >> $CONFIG
+    echo "ESCALE         = 1.0"           >> $CONFIG
+    echo "RAWENERGY      = F"             >> $CONFIG
+    echo "TARGETRATE     = 100000.0"      >> $CONFIG    # シフト長 [100nsec]．100000 [100nsec] = 10 [msec]．
+    echo "WINDOWSIZE     = 250000.0"      >> $CONFIG    # 窓幅 [100nsec].     250000 [100nsec] = 25 [msec]．
+    echo "USEHAMMING     = T"             >> $CONFIG    # Hamming 窓を使うかどうかの指定．今回は Hamming 窓を使用する．
+    echo "PREEMCOEF      = 0.97"          >> $CONFIG    # 高域強調を $1 + z^{PREEMCOEF}$ なる z 変換で行う．
+
+    echo "NUMCHANS       = 24"            >> $CONFIG    # MFCC を抽出する際のフィルタバンク数の設定．デフォルトでは 20 だが，24 の方が認識率が高い場合が多いらしい．
+    echo "NUMCEPS        = 12"            >> $CONFIG    # リフタリング後の MFCC の次元数．デフォルトも 12 である．
+    echo "SAVECOMPRESSED = F"             >> $CONFIG    # 出力ファイルを圧縮するかどうかの指定．
+    echo "SAVEWITHCRC    = F"             >> $CONFIG    # 出力ファイルに CRC 記号を含めるかどうかの指定．
+
+    # 
+    HCopy -T 1        \
+          -S $SCPFILE \
+          -C $CONFIG
+fi
+
+
+if [ $EXEC = clean ];then
+    echo "rm -r -f $MFCCDIR"
+    rm -r -f $MFCCDIR
+    echo "rm -r -f $CONFIG"
+    rm -r -f $CONFIG
+    echo "rm -r -f $SCPFILE"
+    rm -r -f $SCPFILE
+fi

@@ -1,0 +1,133 @@
+#!/bin/bash
+
+###########################
+# 単語HMMを作成するスクリプト #
+###########################
+
+# 途中で作成されるファイル
+CONFIG=config/config.train  # HCompV, HERest
+HMMLST=hmm.lst  # HERest
+MLF=word.mlf    # HERest
+
+# 各種条件
+NUMDIM=39               # make_proto.py # for MELSPEC is 24
+NUMSTATE=25             # make_proto.py
+SOURCEKIND=MFCC_E_D_A  # HCompV, HERest
+TARGETKIND=MFCC_E_D_A  # make_proto.py, HCompV, HERest
+NUMITER=5               # HERest
+vfloor=0.001            # HERest
+HMMNAME=word            # HCompV, HERest
+
+# ディレクトリ指定
+MFCCDIR=01feature/${SOURCEKIND}
+MODELDIR=02hmm/${TARGETKIND}
+
+if [ $# = 0 ]; then 
+    echo """
+usage : ./trainHMM.bash N
+
+    N = 1 : make init-HMM   [make_proto.py, HCompV]
+        2 : train HMM       [HERest]
+        ALL : run ALL process
+        clean :
+"""
+    exit
+else
+    EXEC=$1;
+fi
+
+if [ $EXEC = 1 ] || [ $EXEC = ALL ];then
+    echo """
+###########################################
+# make Init-Model (make_proto.py, HCompV) #
+###########################################
+"""
+    # make output diectory
+    OUTDIR=${MODELDIR}/${NUMSTATE}states
+    mkdir -p $OUTDIR/00
+
+    # make proto-HMM
+    ./make_proto.py -d $NUMDIM     \
+	            -k $TARGETKIND \
+                    -s $NUMSTATE   \
+                     > ${MODELDIR}/${NUMSTATE}states/proto
+
+    # make config
+    echo "SOURCEKIND     = ${SOURCEKIND}" >  $CONFIG
+    echo "TARGETKIND     = ${TARGETKIND}" >> $CONFIG
+
+    # make HMM-list file
+    echo $HMMNAME > $HMMLST
+
+    # init HMM (HCompV)
+    for mfccfile in $MFCCDIR/*.mfcc;do
+        NAME=$(echo $mfccfile | sed -e "s@$MFCCDIR/@@g" -e "s@\.mfcc@@g")
+
+        HCompV -T 1                 \
+               -C $CONFIG           \
+               -m                   \
+               -v $vfloor           \
+               -o ${NAME}.hmm       \
+               -M ${OUTDIR}/00      \
+                  ${OUTDIR}/proto   \
+                  $mfccfile         \
+                  | tee ${OUTDIR}/00/${NAME}.log
+
+        echo $NAME
+        sed "s@~h \"${NAME}.hmm\"@~h \"${HMMNAME}\"@g" ${OUTDIR}/00/${NAME}.hmm > $OUTDIR/tmp
+        mv $OUTDIR/tmp ${OUTDIR}/00/${NAME}.hmm
+    done
+
+fi
+
+if [ $EXEC = 2 ] || [ $EXEC = ALL ];then
+    echo """
+######################
+# train HMM (HERest) #
+######################
+"""
+    # make Master Label File (MLF)
+    echo "#!MLF!#"      >  $MLF
+    echo "\"*/*\""      >> $MLF
+    echo "${HMMNAME}"   >> $MLF
+    echo "."            >> $MLF
+
+    # HERest
+    for mfccfile in $MFCCDIR/*.mfcc;do
+        NAME=$(echo $mfccfile | sed -e "s@$MFCCDIR/@@g" -e "s@\.mfcc@@g")
+
+        # train : run HERest command  $NUMITER times
+        INPUTHMM=$MODELDIR/${NUMSTATE}states/00/${NAME}.hmm
+        for ((i=1 ; i <= $NUMITER ; i++));do
+
+            # output directory
+            OUTDIR=${MODELDIR}/${NUMSTATE}states/0${i}
+            mkdir -p $OUTDIR
+
+            # train HMM
+	        HERest -T 1         \
+                   -C $CONFIG   \
+                   -m 1         \
+                   -v $vfloor   \
+                   -M $OUTDIR   \
+                   -H $INPUTHMM \
+                   -I $MLF      \
+                   $HMMLST      \
+                   $mfccfile    \
+                   | tee $OUTDIR/${NAME}.log
+
+            INPUTHMM=$OUTDIR/${NAME}.hmm
+        done
+    done
+fi
+
+if [ $EXEC = clean ];then
+    echo "rm -r -f $MODELDIR"
+    rm -r -f $MODELDIR
+    echo "rm -r -f $HMMLST"
+    rm -r -f $HMMLST
+    echo "rm -r -f $MLF"
+    rm -r -f $MLF
+    echo "rm -r -f $CONFIG"
+    rm -r -f $CONFIG
+fi
